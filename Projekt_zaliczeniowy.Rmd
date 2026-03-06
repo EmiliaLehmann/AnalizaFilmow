@@ -1,0 +1,500 @@
+---
+title: "Projekt zaliczeniowy- analiza filmów (EDA)"
+output: html_document
+date: "2026-01-19"
+author: Emilia Lehmann
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+unzip("nowe_filmy.zip", exdir = "dane_nowe")
+pliki_w_folderze <- list.files("dane_nowe")
+print(pliki_w_folderze)
+library(readr)
+movies <- read_csv(paste0("dane_nowe/", pliki_w_folderze[1]))
+library(tidyverse)
+library(tidyr)
+library(mice)
+library(ggcorrplot)
+
+
+```
+
+## Wprowadzenie
+
+Przeprowadziłam Eksploracyjną Analizę Danych (EDA) obszernego zbioru informacji o filmach z bazy Kaggle. Głównym celem analizy jest zrozumienie mechanizmów rządzących rynkiem filmowym poprzez odpowiedź na szereg pytań badawczych. 
+Orginalna baza danych została stworzona z myślą o tworzeniu systemów rekomendacji filmów. Składa się z blisko 5 000 wierszy danych (dokładniej 4 803 filmów). Każdy film jest opisanny za pomocą 24 kolumn.
+
+## Zmienne, których będę używać to: 
+
+**budget** (num)- budżet filmu w dolarach.
+
+**genres ** (chr)- wszystkie gatunki, do których należy film.
+
+**original_language** (chr)– kod języka (np. en -english, pl -polish), w którym film został nakręcony.
+
+**original_title** (chr)– tytuł filmu w języku oryginalnym.
+
+**popularity** (num)– wskaźnik liczbowy określający popularność filmu w serwisie.
+
+**release_date** (Date)– data premiery kinowej. 
+
+**revenue** (num)– całkowity przychód ze sprzedaży biletów (box office) w dolarach.
+
+**runtime** (num)– czas trwania filmu w minutach.
+
+**title** (chr)– tytuł filmu (najczęściej w języku angielskim).
+
+**vote_average** (num)– średnia ocen wystawionych przez użytkowników w skali od 1 do 10 w serwisie.
+
+**vote_count** (num)– łączna liczba oddanych głosów w serwisie.
+
+**director** (chr)- reżyser filmu.
+
+## Sprawdzenie struktury danych.
+
+```{r}
+str(movies)
+```
+Widzę, że niektóre zmienne nie będą mi potrzebne, więc się ich "pozbędę".
+```{r}
+movies<- movies|>
+  select(title, director, release_date, genres, runtime, budget, revenue,  original_language, original_title, popularity, vote_average, vote_count)
+
+```
+         
+```{r}
+summary(movies)
+```
+
+Wyświetlam część wartości, by lepiej się zapoznać z tą bazą:
+
+```{r}
+head(movies)
+tail(movies)
+```
+
+Wyświetlam tylko te "przydatniejsze" zmienne.
+
+```{r}
+analiza<-movies |>
+  select(title, genres, revenue, budget, vote_average, vote_count)
+
+analiza
+```
+
+
+# Analiza bazy danych i postawienie pytań badawczych.
+
+## Pytanie 1: Ile filmów danego gatunku znajduje się w tej bazie?
+
+Zanim zacznę badać zarobki, oceny i bardziej szczegółowe dane, sprawdzę, który gatunek dominuje.
+
+```{r}
+pyt1 <- movies |>
+ separate_rows(genres , sep = " ") |> 
+  mutate(genres = ifelse(genres == "Science", "Science-Fiction",ifelse(genres == "TV", "TV Movie", genres))) |>
+  filter(!genres %in% c("Fiction", "Movie")) |>
+  filter(!is.na(genres)) |>
+  select(original_title, genres ) |>
+  group_by(genres ) |>
+  summarise(number_of_films = n()) |>
+  arrange(desc(number_of_films))
+```
+
+Jeden film może należeć do paru gatunków, dlatego musiałam podzielić zmienną "genres" tak by każdy wiersz znajdował się w jedej kategorii (niestety gatunki "Science Fiction" oraz "TV Movie" zostały rozdzielone, więc musiałam je na nowo "złączyć" i usunąc powtórki).
+
+```{r}
+pyt1
+```
+ 
+Widać tutaj, gatunki filmów z największą ilością produkcji.  
+Największą grupę stanowią Dramaty, ten gatunek ma dość elastyczną definicje oraz szeroki zakres dlatego dużo filmów należy do tej kategorii, podczas gdy rodzaje jak np. "Western"(który znajduje się bardzo nisko w tym zestawieniu) ma bardzo charakterystyczną tematykę, klimat i obejmują mniejszą liczbę filmów. Więc nic w tym dziwnego, że "Drama" znajduje się tak wysoko.
+
+```{r}
+pyt1_wykres <-pyt1|>
+  top_n(10, number_of_films)
+
+wykres1 <- ggplot(pyt1_wykres, aes(x = reorder(genres, number_of_films), y = number_of_films/1000)) +
+  geom_col(color="purple", fill="violet") +
+  labs(title = "W jakich gatunkach powstało najwięcej filmów?",x="Gatunek filmowy", y = "Ilość filmów w tysiącach")
+
+wykres1
+```
+
+Wykres pokazuje jak wiele jest filmów w gatunku "Drama", w porównaniu do 9 kolejnych kategorii z największą ilościa filmów (ponad 500 filmów więcej w porównaniu z "Comedy").
+
+## Pytanie 2: W których latach wyszło najwięcej filmów? Jak zmieniała się ilość wydawanych filmów na przestzreni lat? 
+
+Teraz sprawdzę kiedy powstało najwięcej filmów i czy widać, że coraz więcej filmów jest tworzonych.
+
+```{r}
+pyt2 <- movies |>
+  separate(release_date, into = c("release_year", "release_month", "release_day"), sep = "-")|>
+  filter(!is.na(release_year)) |>
+  group_by(release_year )  |>
+  summarise(number_of_films = n()) 
+```
+
+Rozdzielam date wydania filmu( release_date), na dzień wydania, miesiąc wydania, rok wydania po to by móc pogrupować filmy ze względu na rok wydania.
+
+```{r}
+pyt2_top<- pyt2 |>
+  top_n(10, number_of_films)|>
+  arrange(desc(number_of_films))
+
+pyt2_top
+```
+
+Najwiecej filmów jest wydawanych na przestrzeni lat 2005-2015. W roku 2009 ilośc filmów osiągneła maksymalną ilość.
+
+```{r}
+pyt2_wykres <- pyt2 |> 
+  mutate(release_year = as.numeric(release_year))
+```
+
+Zamieniam rok wydania filmu (release_year) na daną numeryczna by łatwiej utworzyć oś liczbową (z przedziałami a nie konkretnymi wartościami).
+
+```{r}
+wykres2 <- ggplot(pyt2_wykres, aes(x = release_year, y = number_of_films)) +
+  geom_line(color = "blue", size = 1) +
+  geom_point( linewidth = 1.5) +
+  labs(
+    title = "Liczby wydanych filmów w zależności roku",
+    x = "Rok wydania",
+    y = "Liczba filmów"
+  ) +
+  theme_minimal()
+
+wykres2
+```
+
+Baza danych nie była dawno uaktualniana, widzimy, że w roku 2017 wydawno 1 film, co jest nieprawdą oraz brak danych po 2017. Dlatego pomimo wzrostu ilości filmów w poprzednich latach tu jest nagły spadek (nie obrazuje to faktycznych danych, tylko to że baza była tworzona do 2017 roku). Poza tym widzimy, że w XXI wieku tworzy się o wiele więcj filmów niż w XX wieku, jest związane z rozwojem technologi, ze zwiększającą się popularnością kina, itp.  
+Przed 1990 rokiem ilość filmów nie przekaczała 50 filmów na rok, natomiast od 2000 (nie licząc lat 2016 i 2017 przez brak dnaych) ilość filmów nie spada ppniżej 150 filmów na rok.
+
+## Pytanie 3: Ile zarobiło pięć najlepszych filmów (według średniej ocen)?
+
+Przez, to że jest to  rozbudowana baza danych, warunkiem żeby być jednym z najlepszych filmów, film musiał dostać co najmniej 6000 głosów, gdyż w tej znajdują się tu też filmy z oceną 10/10, ale dostały tylko 1 głos, więc byłoby to niesprawiedliwe by pokazać je jako najlepsze 
+
+Teraz przejdę do sprawdzania średnich ocen i zobaczę ile zarobiły filmy z najlepszymi ocenami. Czy ich świetna ocena będzie miała wpływ na ich zarobek? 
+
+```{r}
+pyt3 <- movies |>
+  filter(vote_count>6000)|>
+  mutate(revenue=revenue/1000000)|>
+  top_n(5, vote_average)|>
+  arrange(desc(vote_average))|>
+  select(original_title, vote_average, vote_count, revenue_in_mln=revenue)
+
+pyt3
+```
+
+Widzimy, że z tych pięciu filmów "The Dark Knight" zarobił najwięcej oraz najwięcej użytkowników na niego głosowało, jednak jeśli chodzi ośrednią ocen plasuje się dopiero na czwartym miejscu.
+
+
+```{r}
+wykres3 <-  ggplot(pyt3, aes(x = reorder(original_title, -revenue_in_mln), y = revenue_in_mln)) +
+  geom_col(color="pink4", fill="lightpink") +
+  labs(title = "Top 5 filmów i ich zarobki w milionach",x="Tytuł filmu", y = "Przychód w milionach")
+
+wykres3
+```
+
+Jak widać na wykresie(i we wczesnijeszej tabeli), mimo bardzo dobrych opinii "The Shawshank Redemption" nie zarobił zbyt dużo pieniędzy ze sprzedaży biletów. Wysoka ocena użytkowników nie zawsze idzie w parze z przychodem kinowym. Najwidoczniej dużą popularność ten film zyskał lata po premierze.
+
+## Jak rozkłada się gęstość ocen filmów w tej bazie danych? 
+
+Po tym jak poznałam wyniki "najlepszych filmów", gdzie żaden z nich nie uzyskał oceny wyższej niż 9, sprawdzę jak rozkłada się gęstość ocen wśród tych wartości.
+ 
+```{r}
+
+wykres3a <- movies %>%
+  ggplot() +
+  geom_density(aes(x = vote_average),
+               color = "darkblue", fill = "lightblue") +
+  theme_light() +
+  labs(title = "Ocena filmów w skali 1-10",
+       x = "ocena",  y="gęstość")
+
+wykres3a
+```
+
+Widzimy, że jest bardzo mało filmów fantastycznych (ocena od 9 do 10), spowodowne to jest najpewniej różnymi gustami, oczekiwaniami wobec filmu.
+Jest mała ilość filmów z oceną niską (0-1), może to być spowodowane słabą jakościa filmu (np. źle nakręcone sceny, zły scenariusz), gustem ludzi, albo małą popularnościa filmu (przez co mniej ludzi zaglosowało, że film jest dobry).
+Najwięcej jest filmów z ocenami średnimi (od 5 do 7,5), czyli filmy te najpewniej trafiły do óżnej publiczności, gdzie ludzie różnorodnie oceniali (np. któs dał 5, inna osoba 9, a nastepna 1) przez co średnia tego filmu znjaduje się "ww środku stawki".
+
+## Pytanie 4: Jakie jest Top 10 najlepiej zarabiających filmów? Ile zarobiły i jakie są ich oceny?
+
+Skoro znamy już najlepsze filmy pod względem oceny, teraz znajdę 10 najlepiej zarabiających filmów i zobaczę ich oceny.
+
+```{r}
+pyt4 <- movies |>
+  mutate(revenue=revenue/1000000)|>
+  top_n(10, revenue )|>
+  arrange(desc(revenue))|>   
+  select(title, revenue_in_mil = revenue, vote_average, vote_count)
+
+pyt4
+```
+
+Mimo dużych zarobków filmy nie mają bardzo dobrych ocen (wahają się od 6.4 do 7.5). Wielu ludzi mogło pójść do kina, ale nie być do końca usatysfakcjonowanymi seansem. Widzimy, że jest w tym rankingu aż 4 filmy wytwórni Marvel, tworzy ona filmy o superbohaterach, które mogą nie przemawiać do starszej publiczności (ludzie mogą myśleć, że bohaterowie, super moce, itd. są dziecinne), ale ma stałych odbiorców (nie tylko dzieci), którzy czekają na kolejne premiery filmów i sprawaiją, że filmy z uniwersum Marvel plasują się wysoko w rankingach zarobków.
+
+## Pytanie 5: Które gatunki filmów są "najdroższe"?
+
+Jakie są statystki opisowe zwiazane z budżetem konkretnych gatunków?
+
+```{r}
+pyt5 <- movies |>
+  separate_rows(genres , sep = " ") |> 
+  mutate(genres = ifelse(genres == "Science", "Science-Fiction",ifelse(genres == "TV", "TV Movie", genres))) |>
+  filter(!genres %in% c("Fiction", "Movie")) |>
+  filter(!is.na(genres)) |>
+  group_by(genres ) |>
+  summarise(
+    mean_budget = mean(budget),
+    sd_budget= sd(budget),
+    median_budget = median(budget),
+    q1_budget = quantile(budget, 0.25),
+    q3_budget= quantile(budget, 0.75),
+    max_budget= max(budget),
+  )|>
+  arrange(desc(mean_budget))
+
+pyt5
+
+```
+
+Wysoka średnia i mediana dla animacji wynika najprawdopodobniej z ogromnych nakładów na technologię CGI, rendering oraz inne nowoczesne technologię pozwalające współczesnym animacjom na realistyczne wyrażanie emocji, dbałość o detale, płynny ruch itp. Widać, że animacja ma stosunkowo wysoki kwartyl pierwszy, co oznacza, że w tym gatunku rzadko spotyka się filmy bardzo tanie, czyli próg wejścia jest wysoki.
+Średnia, a mediana bardzo często się różnią o wielkie kwoty (np. W "Fantasy" 64 miliony- śrdnia, a mediana jest o 18 milionó mniejsza). Oznacza to, że w tych gatunkach istnieje grupa bardzo drogich produkcji (co widać w kolumnie max_budget, tam filmy fantasy osiągają nawet do 380 milionów), które zawyżają średnią, podczas gdy połowa filmów w danej kategorii jest produkowana za znacznie mniejsze kwoty.
+W kolumnie odchylenie standardowe widzimy zazwyczaj duże wartości. Dla "Adventure" odchylenie to blisko 63 miliony, więc filmy w tej kategorii maja bardzo duże rozproszenie.
+
+
+## A jak zarobki w porównaniu do budżetu? Oraz zysk z produkcji?
+
+```{r}
+
+pyt5a <- movies |>
+  separate_rows(genres , sep = " ") |> 
+  mutate(genres = ifelse(genres == "Science", "Science-Fiction",ifelse(genres == "TV", "TV Movie", genres))) |>
+  filter(!genres %in% c("Fiction", "Movie")) |>
+  filter(!is.na(genres)) |>
+  group_by(genres ) |>
+  summarise(
+   profit=mean(revenue)-mean(budget),
+    relationship =mean(revenue)/mean(budget))|>
+  arrange(desc(profit))
+
+pyt5a
+
+```
+
+Mimo dużego budżetu animacje zarabiaja średnio najwięcej, są to więc zazwyczaj filmy, w które warto inwestować gdyz przynoszą zyski (w tej bazie danych przedstawione są tylko zarobki ze sprzedaży biletów, a filmy animowane też zarabiają najczęściej później na zabawkach, poprzez platformy streaming'owe, itp). Najmniejszy profit mają filmy "Tv movie", gdzie róznica średnich z przychodu i kosztów jest ujemna.
+Stosunek przychodu do kosztów, jest wysoki u filmów z największym profitem, ale najwyższy ten wskaźnik ma "Documentary", przez to, że wyprodukowanie takich filmów nie jest zbyt drogie, ale jest opłacalne.
+```{r}
+pyt5a_wykres <- pyt5 |>
+  select(genres, mean_budget) |>
+  left_join(pyt5a, by = "genres")|>
+  top_n(8, profit)
+
+wykres5a<-ggplot(pyt5a_wykres, aes(x = mean_budget / 1000000, y = profit / 1000000, size = relationship, color = genres)) +
+  geom_point(alpha = 0.7) +
+  scale_size(range = c(3, 15)) + 
+  labs(
+    title = "Analiza opłacalności gatunków: Koszty vs Zysk",
+    x = "Średni budżet w milionach",
+    y = "Średni przychód w milionach",
+    size = "Zwrot (Przychód/Budżet)",
+    color= "Gatunek"
+  ) +
+  theme_minimal()
+
+wykres5a
+```
+
+Na wykresie przedstawiłam 8 najlepszych gatunków, jeżeli chodzi o profit.
+Gatunki "Animation", "Fantasy" oraz "Adventure" znajdują się najwyżej, czyli wymagają najwyższych nakładów finansowych, ale generują jednak zdecydowanie najwyższe zyski. Animacje mają największy bąbelek na całym wykresie, co oznacza, że mimo wysokich kosztów, oferuje najlepszy stosunek przychodu do budżetu.
+Złoty środek osiągają gatunki: Family, Action, Science-Fiction. Przy średnim budżecie, maja średnie przychody, ale gatunek Family ma największy stosunek zarobków do nakładów (najwiekszy bąbelek).
+Thriller oraz War mają najniższe budżety generują też najniższe zyski.W przypadku gatunku wojennego zwrot jest bardzo mały (najmniejsza kropka), co sugeruje, że jest to gatunek najmniej opłacalny w tym zestawieniu.
+
+## Pytanie 6: Jakie sa najlepsze filmy NIEanglojezyczne?
+
+Najpierw sprawdźmy ogólne informacje dla filmów nieanglojęzycznych i anglojęzycznych:
+
+```{r}
+pyt6 <- movies |>
+  mutate(language = ifelse(original_language == "en", "english", "other")) |>
+  group_by(language) |>
+  summarise(
+    number_of_films = n(),
+    mean_vote_average = mean(vote_average),
+    mean_vote_count = median(vote_count),
+    mean_revenue = mean(revenue))
+
+pyt6
+```
+
+Widzimy, że w tej bazie danych jest o wiele więcej filmów anglojęzycznych niż produkcji w innych językach razem. Mimo to średnia ich ocen jest lekko wyższa niż filmów w języku angielskim (ale też mają prawie 3 razy mniej głosów). Widać wyraźną róznicę między budżetami tych dwóch grup- filmy wyprodukowane w innych językach niż angielski są dużo "tańsze",  gdyż często sa produkowane dla mniejszego grona odbiorców, a budżet powinien być proporcjonalny do oczekiwanych zysków, mniejsza widownia docelowa (np. rozumiejąca język francuski) może wymuszać niższy budżet, aby inwestycja miała szansę się zwrócić. Filmy, które mają dotrzeć do jak najszerszej liczby odbiorców są produkowane po angielsku (np. produkcje Marvel Studios). 
+Na większy budżet fimów angielskich mogą wpływać też gaże aktorów Hollywood'zkich, specjalistów technicznych, itp.
+W tej bazie danchy znajdują się filmy, które zostały przetłumaczone na inne języki, gdyż zdobyły popularność poza krajem, gdzie zostały stworzone, "lokalne hity" się tu nie znadują , bo trafiły do mniejszej ilości ludzi.
+
+## Jakie są najlepsze filmy pod względem zarobku? 
+
+```{r}
+pyt6a <- movies|>
+  filter(original_language!="en")|>
+  mutate(revenue=revenue/1000000)|>
+  top_n(5, revenue)|>
+  arrange(desc(revenue))|>
+  select(original_title, title, revenue_in_mln=revenue,original_language  )
+
+pyt6a
+```
+
+Pierwsze miejsce, jeśli chodzi o największy przychód, zajmuje film animowany "Spirited Away".
+W 5 najlepiej zarabiających filmach znajdują się trzy japońskie filmy (ja) oraz dwa chińskie (zh). Azjatyckie kino jest więc najlepsze pod tym względem. 
+
+## A jakie są najlepsze pod względem oceny?
+
+```{r}
+pyt6b <- movies|>
+  filter(original_language!="en")|>
+  mutate(revenue=revenue/1000000)|>
+  top_n(5, vote_average)|>
+  arrange(desc(vote_average))|>
+  select(original_title, title, vote_average, original_language  )
+
+pyt6b
+```
+
+W tej grupie również wygrywa "Spirited Away".
+Znajduja się tu cztery filmy japońskie (ja), wszytskie na czterech pierwszych miejscach oraz dwa filmy włoskie (it) i jeden portugalski (pt). Drugie, trzecie i czwarte miejsce mają taką samośrednią głosów, również piąte, szóste i siódme miejsce są sobie równe.
+Tutaj dominacja filmów azjatyckich nie jest aż tak widoczna, gdyż mamy trzy filmy europejskie.
+
+## Pytanie 7:Jacy reżyserzy stworzyli najwięcej filmów?
+
+```{r}
+pyt7 <- movies |>
+  filter(!is.na(director)) |>
+  group_by(director ) |>
+  summarise(liczba = n()) |>
+   top_n(4,liczba)|>
+  arrange(desc(liczba)) 
+ 
+pyt7
+```
+
+Widzimy czterech mężczyzn, których dorobek filmowy to co najmniej 20. Najaktywniejszy z nich jest Steven Spilberg, który stworzył takie hity kinowe jak: "Szczęki", "E.T", "Park Jurajski", "Lista Schindlera".
+
+## A jaki jest rozkład przychodów najaktywniejszych twórców?
+
+```{r}
+
+pyt7_wykres <- movies |>
+  filter(director %in% pyt7$director, revenue > 0)
+
+wykres7 <- pyt7_wykres |>
+  ggplot() +
+  geom_boxplot(aes(x = director, y = revenue / 1000000, fill = director))+
+  theme_light() +
+  labs(title = " Reżyser, a przychód",
+       x = "Reżyser",
+       y = "przychód z filmów w milionach")
+
+wykres7
+```
+
+Spielberg dominuje w tym zestawieniu jego pudełko jest najwyżej, co oznacza, że jego typowy film zarabia więcej niż największe hity Woody'ego Allena czy Clinta Eastwooda. Outlier (Wartość odstająca), czyli punkt na samym szczycie, oznaczjący film który zarobił ponad 875 milionów. 
+Filmy pozostałych reżyserów zarabiają mniej, ale mają też większą stabilnośc przychodu, o czym świadczy rozpietość pudełek.
+
+## Pytanie 8: Jakie są statystyki filmów w danych dekadach?
+
+```{r}
+pyt8 <- movies |>
+  separate(release_date, into = c("release_year", "release_month", "release_day"), sep = "-")|> 
+  mutate(release_year = as.numeric(release_year)) |>
+  filter(!is.na(release_year) & release_year >= 1970) |> 
+  mutate(decade = ifelse(release_year >= 2010, "2010s",
+                         ifelse(release_year >= 2000, "2000s",
+                                ifelse(release_year >= 1990, "1990s", 
+                                       ifelse(release_year >= 1980, "1980s",
+                                              ifelse(release_year >= 1970, "1970s", "Older"))))))|>
+  group_by(decade) 
+
+pyt8_vote<- pyt8|>
+  summarise(
+    number_of_films = n(),
+    mean_budget = mean(budget),
+    median_revenu = median(revenue),
+    mean_vote_average =mean(vote_average),
+    sd_vote_average = sd(vote_average)  ) |>
+  arrange(desc(decade))
+
+pyt8_vote
+```
+
+Wyraźnie widać stały wzrost ilości filmów tworzonych w danych dekadach. Co prawda w latach po 2010 jest mniej filmów niż w latach 2000-2009, ale to dlatego, że baza dancyh nie jest skończona- znajdują się tu tylko filmy wydane do 2016 roku- jestem więc pewna, że analiza przeprowadzona obecnie pokazałaby, że: liczba filmów wydanych od 2010 > liczba filmów wydanych w latach 2000-2009.
+średnie budżety filmów są coraz większe (spowodowane jest to przez: nowoczesne maszyny, produkcje "na większą skale", itp., ale również inflacje), jednak średnie zarobki z filmów nie różnią się aż tak.
+Odchylenie standardowe ocen jest najniższe w latach 70. i rośnie w nowszych dekadach.Widzowie więc są coraz bardziej podzieleni w opiniach oraz obecnie mamy większy przekrój jakości, w starszych dekadach poziom jest "równie wysoki".
+
+```{r}
+pyt8a<- pyt8|>
+  summarise(
+    mean_runtime = mean(runtime, na.rm = TRUE),
+    median_runtime = median(runtime, na.rm = TRUE),
+    sd_runtime = sd(runtime, na.rm = TRUE),
+    max_runtime = max(runtime, na.rm = TRUE)) |>
+  arrange(desc(decade))
+
+pyt8a
+```
+
+Filmy z dekady  na dekadę stają się coraz krótsze. Przeciętna produkcja skróciła się o około 12-14 minut w ciągu pół wieku. Może to wynikać z paru rzeczy:
+1. Zdolność ludzi do długotrwałego skupienia uwagi spada (tak zwany "Short Attention Span"). Reżyser zmoże więc się starać, aby tempo filmu było szybsze, a akcja bardziej skondensowana, by widz nie zaczął sięgać po telefon w trakcie seansu. 
+2. W filmach fantasy, itp. sceny z efektami specjalnymi kosztują setki tysięcy dolarów. Skrócenie filmu może przyniosić studiu ogromne oszczędności, nie wpływając drastycznie na fabułę.
+3.Przez popularyzację seriali, filmy kinowe skupiają się teraz na bardziej skondensowanych wątkach. Rozbudowana fabuła lub sagi przeniosły się do formatów odcinkowych.
+W każdej dekadzie średnia jest nieco wyższa niż mediana, gdyż W każdej dekadzie trafiają się pojedyncze, ekstremalnie długie produkcje, które podwyższają średnią, podczas gdy większość filmów trzyma się bliżej 100-110 minut.
+Mimo skrócenia długości filmów, najdłuższy film został stworzony w latach 2010, a ten film to:
+
+```{r}
+pyt8b<-movies|>
+  filter(runtime==338)
+
+pyt8b
+```
+
+##Pytanie 9: Czy budżet wpływa na ocenę filmu?
+
+```{r}
+pyt9 <- movies |>
+  filter(budget > 0, vote_count > 100) 
+```
+Filtruje filmy z mniejszą ilościa głosów niż 100, by średnia ocena była sprawidliwa oraz produkcje, które w tej bazie danych mają przypisany budżet "0".
+
+```{r}
+wykres9<- pyt9|>
+  ggplot(aes(x = budget / 1000000, y = vote_average)) +
+  geom_point(alpha = 0.2, color = "blue4") +
+  labs(title = "Budżet a Średnia Ocena",
+       x = "Budżet w milionach", y = "Średnia ocena") +
+  theme_minimal()
+
+wykres9
+```
+
+Na podstawie wykresu możemy stwierdzić, że nie ma bezposredniego związku między budżetem filmu, a jego oceną. Punkty nie układają się w wyraźny skos (np. od lewego dolnego do prawego górnego rogu). Oznacza to, że współczynnik korelacji Persona jest bliski zeru. Zwiększenie budżetu nie gwarantuje wyższej oceny u widza. 
+Produkcje z budżetem powyżej 200 milionów nie spadają poniżej oceny 5, ale też nie przebijają progu 8. Filmy te znajdują sie w stabilnej sytuacji.
+
+## Jakie są zależności między budżetem, przychodem, średnią ocen i popularnością?
+```{r}
+pyt9a = cor(movies[,c("revenue", "budget", "vote_average", "popularity" )], 
+ method = "spearman")
+
+round(pyt9a, 2)
+
+```
+
+Korelacja przychodu i popularności jest najsilniejsza. Jest to dodatni związek (wraz ze wzrostem popularności, rośnie przychód filmu).
+Trochę mniej wysoka, ale dalej silna relacja występuje dla przychodu i budżetu. Wysokie nakłady finansowe statystycznie przekładają się na wysokie przychody.
+Brak korelacji występuje dla budżetu i średniej oceny, oznacza to, że kwota wydana na produkcję filmu nie ma praktycznie żadnego wpływu na to, czy film zostanie dobrze oceniony przez widzów.
+
+
